@@ -13,6 +13,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -54,14 +55,13 @@ public class HEOSConnector {
    }
 
    /**
-    * Connects to HEOS
+    * Connects to the HEOS system
     */
-   private void connect() {
+   public void connect() {
       try {
          // If socket is already open, close it first
          if (socket != null && !socket.isClosed()) {
             try {
-               LOGGER.warning("HEOS already connected, disconnecting");
                socket.close();
             } catch (Exception e) {
                LOGGER.severe("Could not disconnect from HEOS " + heosHost + ":" + ServletConstants.HEOS_PORT);
@@ -145,11 +145,11 @@ public class HEOSConnector {
    }
 
    /**
-    * Sends a heartbeat to the HEOS system
+    * Finds out if connected to the HEOS system by trying to send a heartbeat
     * 
-    * @return True if ok, false if not
+    * @return True if connected, false if not
     */
-   public boolean sendHeartbeat() {
+   public boolean isConnected() {
       return validateResult(sendCommand("system/heart_beat", ""), HEOS_RESULT_SUCCESS);
    }
 
@@ -413,25 +413,23 @@ public class HEOSConnector {
     * @return The command result or null if none/error
     */
    private synchronized String sendCommand(String command, String arguments) {
+      // Check parameters
       if (command == null || command.isEmpty() || arguments == null) {
          LOGGER.severe("Invalid command arguments");
          return null;
-      }
-      // If not connect, try to connect...
-      if (!socket.isConnected()) {
-         LOGGER.warning("Not connected to HEOS, connecting...");
-         connect();
       }
 
       // Execute command
       String completeCommand = HEOS_PREFIX + command + arguments;
       try {
-         BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
+         // Send command
          PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
          LOGGER.info("Sending command: " + completeCommand);
          out.println(completeCommand);
+         // Read response
          String response = "";
          long startTime = System.currentTimeMillis();
+         BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
          do {
             response = in.ready() ? in.readLine() : null;
             // If a response

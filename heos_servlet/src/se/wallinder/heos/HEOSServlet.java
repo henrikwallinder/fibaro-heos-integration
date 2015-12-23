@@ -27,7 +27,6 @@ import java.util.logging.Logger;
 
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
-import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -40,14 +39,13 @@ import se.wallinder.heos.util.ServletProperties;
 /**
  * Servlet implementation class HEOS
  */
-@WebServlet("/")
 public class HEOSServlet extends HttpServlet {
 
    private final static long serialVersionUID = 1L;
    private final static Logger LOGGER = Logger.getLogger(HEOSServlet.class.getName());
    private final static long EVERY_HOUR_MS = 60 * 60 * 1000;
    private final Timer timer;
-   private Date lastHeartbeat;
+   private Date lastConnection;
    private ServletProperties properties;
    private HEOSConnector heosConnector;
    private FibaroConnector fibaroConnector;
@@ -66,11 +64,17 @@ public class HEOSServlet extends HttpServlet {
    class HeartbeatTimer extends TimerTask {
       @Override
       public void run() {
-         boolean result = heosConnector.sendHeartbeat();
-         if (!result) {
-            LOGGER.warning("HEOS-system did not respond to heartbeat");
+         // Check if connected
+         boolean connected = heosConnector.isConnected();
+         if (!connected) {
+            heosConnector.connect();
+            // Try again
+            connected = heosConnector.isConnected();
+            if (!connected) {
+               LOGGER.warning("HEOS-system did not respond");
+            }
          }
-         lastHeartbeat = result ? new Date(System.currentTimeMillis()) : null;
+         lastConnection = connected ? new Date(System.currentTimeMillis()) : lastConnection;
       }
    }
 
@@ -129,6 +133,18 @@ public class HEOSServlet extends HttpServlet {
             response.getWriter().print("FAILED");
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return;
+         }
+
+         // Command okay, check if connected
+         if (!heosConnector.isConnected()) {
+            heosConnector.connect();
+            // Check again
+            if (!heosConnector.isConnected()) {
+               LOGGER.severe("Not connected to the HEOS system");
+               response.getWriter().print("FAILED");
+               response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+               return;
+            }
          }
 
          boolean result = false;
@@ -211,6 +227,7 @@ public class HEOSServlet extends HttpServlet {
             if ((heosCommand == HEOSCommands.TRIGGER) && heosConnector.isPlaying(player)) {
                response.getWriter().print("SUCCESS");
                response.setStatus(HttpServletResponse.SC_OK);
+               lastConnection = new Date(System.currentTimeMillis());
                return;
             }
             // Find out which station to play
@@ -260,6 +277,7 @@ public class HEOSServlet extends HttpServlet {
          // End of the road
          LOGGER.info(heosCommand.name() + " requested on player " + heosConnector.getPlayers().get(player) + ", result: " + (result ? "SUCCESS" : "FAILED"));
          response.getWriter().print(result ? "SUCCESS" : "FAILED");
+         lastConnection = result ? new Date(System.currentTimeMillis()) : lastConnection;
          response.setStatus(HttpServletResponse.SC_OK);
 
       } catch (Exception e) {
@@ -295,12 +313,13 @@ public class HEOSServlet extends HttpServlet {
       // List settings
       writer.println("<h2 style='font-family:sans-serif;font-size:20px;color:#426d6e;margin-bottom: 5px;'>Settings</h1>");
       writer.println("<div>" + getValue("Settings file") + getServletContext().getResource("/WEB-INF/settings.properties").getPath() + "</div>");
-      writer.println(
-            "<div>" + getValue("HEOS host") + properties.getHeosHost() + (heosConnector.sendHeartbeat() ? " (connected)" : " (disconnected)") + "</div>");
+      boolean isConnected = heosConnector.isConnected();
+      lastConnection = isConnected ? new Date(System.currentTimeMillis()) : lastConnection;
+      writer.println("<div>" + getValue("HEOS host") + properties.getHeosHost() + (isConnected ? " (connected)" : " (disconnected)") + "</div>");
       writer.println("<div>" + getValue("HEOS user") + properties.getHeosUser()
             + (heosConnector.isUserSignedIn(properties.getHeosUser()) ? " (signed in)" : " (signed out)") + "</div>");
-      writer.println(
-            "<div>" + getValue("HEOS heartbeat") + (lastHeartbeat != null ? new SimpleDateFormat("yyyy-MM-dd HH:mm").format(lastHeartbeat) : "-") + "</div>");
+      writer.println("<div>" + getValue("HEOS connection") + (lastConnection != null ? new SimpleDateFormat("yyyy-MM-dd HH:mm").format(lastConnection) : "-")
+            + "</div>");
       writer.println("<div>" + getValue("Fibaro host") + properties.getFibaroHost() + "</div>");
       writer.println("<br><div>To change settings, update settings file and reload Servlet</div>");
 

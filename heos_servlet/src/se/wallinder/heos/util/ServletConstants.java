@@ -15,7 +15,7 @@ public class ServletConstants {
     ***********/
 
    // Request parameters
-   public static final String SERVLET_VERSION = "1.0.1";
+   public static final String SERVLET_VERSION = "1.1.0";
    public static final String REQUEST_PARAM_PLAYER = "player";
    public static final String REQUEST_PARAM_COMMAND = "command";
    public static final String REQUEST_PARAM_STATION = "station";
