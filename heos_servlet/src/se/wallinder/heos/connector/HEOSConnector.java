@@ -2,11 +2,13 @@ package se.wallinder.heos.connector;
 
 import static se.wallinder.heos.util.ServletConstants.HEOS_CMD_UNDER_PROCESS;
 import static se.wallinder.heos.util.ServletConstants.HEOS_FAVORITES_ID;
+import static se.wallinder.heos.util.ServletConstants.HEOS_PLAYLIST_ID;
 import static se.wallinder.heos.util.ServletConstants.HEOS_PREFIX;
 import static se.wallinder.heos.util.ServletConstants.HEOS_RESULT_STATE_PLAY;
 import static se.wallinder.heos.util.ServletConstants.HEOS_RESULT_SUCCESS;
 import static se.wallinder.heos.util.ServletConstants.HEOS_SLEEPTIME_IN_MS;
 import static se.wallinder.heos.util.ServletConstants.HEOS_TIMEOUT_IN_MS;
+import static se.wallinder.heos.util.ServletConstants.HEOS_TYPE_PLAYLIST;
 import static se.wallinder.heos.util.ServletConstants.HEOS_TYPE_STATION;
 
 import java.io.BufferedReader;
@@ -35,6 +37,7 @@ public class HEOSConnector {
    private final static Logger LOGGER = Logger.getLogger(HEOSConnector.class.getName());
    private Map<String, String> players;
    private Map<String, String> stations;
+   private Map<String, String> playlists;
    private final String heosHost;
    private final String heosUser;
    private final String heosPassword;
@@ -52,6 +55,7 @@ public class HEOSConnector {
       connect();
       players = getAllPlayers();
       stations = getAllStations();
+      playlists = getAllPlaylists();
    }
 
    /**
@@ -145,6 +149,56 @@ public class HEOSConnector {
    }
 
    /**
+    * Plays the specified playlist (id) on the specified player
+    * 
+    * @param playerID The ID of the player
+    * @param playlistID The ID of the playlist
+    * @return True if okay, false if not
+    */
+   public boolean playlist(String playerID, String playlistID) {
+      // Always ungroup before playing if grouped
+      if (isGrouped(playerID)) {
+         ungroupPlayers(playerID);
+      }
+
+      // If not signed in, sign in
+      if (!isUserSignedIn(heosUser)) {
+         signIn();
+      }
+
+      // If unsuccessful, log error
+      boolean success = playPlaylist(playerID, playlistID);
+      if (!success) {
+         LOGGER.warning("Could not play playlist " + playlistID + " on player " + playerID);
+      }
+
+      return success;
+   }
+
+   /**
+    * Plays an input of a player on a player
+    * 
+    * @param playerID The ID of the player
+    * @param inputPlayerID The ID of the player with the input
+    * @param inputName The name of the input
+    * @return True if okay, false if not
+    */
+   public boolean input(String playerID, String inputPlayerID, String inputName) {
+      // Always ungroup before playing if grouped
+      if (isGrouped(playerID)) {
+         ungroupPlayers(playerID);
+      }
+
+      // If unsuccessful, log error
+      boolean success = playInput(playerID, inputPlayerID, inputName);
+      if (!success) {
+         LOGGER.warning("Could not play input " + inputName + " of player " + inputPlayerID + " on player " + playerID);
+      }
+
+      return success;
+   }
+
+   /**
     * Finds out if connected to the HEOS system by trying to send a heartbeat
     * 
     * @return True if connected, false if not
@@ -219,6 +273,24 @@ public class HEOSConnector {
    }
 
    /**
+    * Updates available playlists
+    * 
+    * @return A map with all player ID:s and names
+    */
+   public void updatePlaylists() {
+      playlists = getAllPlaylists();
+   }
+
+   /**
+    * Gets all playlists
+    * 
+    * @return A map with all playlist ID:s and names
+    */
+   public Map<String, String> getPlaylists() {
+      return playlists;
+   }
+
+   /**
     * Gets all available players
     * 
     * @return A map with all player ID:s and names
@@ -281,6 +353,44 @@ public class HEOSConnector {
          }
       } catch (ParseException pe) {
          LOGGER.severe("Could not parse result when getting stations");
+      }
+      return stations;
+   }
+
+   /**
+    * Gets the users playlists
+    * 
+    * @return A map with all playlist ID:s and names
+    */
+   private Map<String, String> getAllPlaylists() {
+      // If not signed in, sign in
+      if (!isUserSignedIn(heosUser)) {
+         signIn();
+      }
+
+      Map<String, String> stations = new HashMap<>();
+      String jsonResult = sendCommand("browse/browse", "?sid=" + HEOS_PLAYLIST_ID);
+      if (jsonResult == null) {
+         LOGGER.warning("Could not get playlists");
+         return stations;
+      }
+      JSONParser parser = new JSONParser();
+      try {
+         JSONObject rootObject = (JSONObject) parser.parse(jsonResult);
+         JSONArray payload = (JSONArray) rootObject.get("payload");
+         Iterator iterator = payload.iterator();
+         // Payload should contain all playlists, check type to be sure
+         while (iterator.hasNext()) {
+            JSONObject element = (JSONObject) iterator.next();
+            String type = (String) element.get("type");
+            String cid = (String) element.get("cid");
+            String name = (String) element.get("name");
+            if (type != null && type.contentEquals(HEOS_TYPE_PLAYLIST)) {
+               stations.put(cid, name);
+            }
+         }
+      } catch (ParseException pe) {
+         LOGGER.severe("Could not parse result when getting playlists");
       }
       return stations;
    }
@@ -382,7 +492,7 @@ public class HEOSConnector {
    }
 
    /**
-    * Sets the station of a specified player
+    * Plays the station of a specified player
     * 
     * @param playerID The ID of the player
     * @param stationID The ID of the station
@@ -390,6 +500,30 @@ public class HEOSConnector {
     */
    private boolean playStation(String playerID, String stationID) {
       return validateResult(sendCommand("browse/play_stream", "?pid=" + playerID + "&sid=" + HEOS_FAVORITES_ID + "&mid=" + stationID), HEOS_RESULT_SUCCESS);
+   }
+
+   /**
+    * Plays the playlist of a specified player, existing queue is replaced
+    * 
+    * @param playerID The ID of the player
+    * @param playlistID The ID of the playlist
+    * @return True if ok, false if not
+    */
+   private boolean playPlaylist(String playerID, String playlistID) {
+      return validateResult(sendCommand("browse/add_to_queue", "?pid=" + playerID + "&sid=" + HEOS_PLAYLIST_ID + "&cid=" + playlistID + "&aid=4"),
+            HEOS_RESULT_SUCCESS);
+   }
+
+   /**
+    * Plays the input of a specified player on a specified player
+    * 
+    * @param playerID The ID of the player
+    * @param inputPlayerID The ID of the player with the input
+    * @param inputName The name of the input
+    * @return True if ok, false if not
+    */
+   private boolean playInput(String playerID, String inputPlayerID, String inputName) {
+      return validateResult(sendCommand("browse/play_input", "?pid=" + playerID + "&spid=" + inputPlayerID + "&input=" + inputName), HEOS_RESULT_SUCCESS);
    }
 
    /**

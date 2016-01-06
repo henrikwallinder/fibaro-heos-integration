@@ -4,8 +4,11 @@ import static se.wallinder.heos.util.ServletConstants.FIBARO_VD_LABEL_ID;
 import static se.wallinder.heos.util.ServletConstants.FIBARO_VD_SLIDER_ID;
 import static se.wallinder.heos.util.ServletConstants.HEOS_DEFAULT_VOLUME;
 import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_COMMAND;
+import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_INPUT_NAME;
+import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_INPUT_PLAYER;
 import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_LABEL_TEXT;
 import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_PLAYER;
+import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_PLAYLIST;
 import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_STATION;
 import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_VIRTUAL_DEVICE;
 import static se.wallinder.heos.util.ServletConstants.REQUEST_PARAM_VOLUME;
@@ -195,6 +198,49 @@ public class HEOSServlet extends HttpServlet {
             }
             break;
 
+         /************
+          * PLAYLIST *
+          ************/
+         case PLAYLIST:
+            // Find out which playlist to play
+            String playlist = request.getParameter(REQUEST_PARAM_PLAYLIST) != null ? request.getParameter(REQUEST_PARAM_PLAYLIST) : "";
+            if (!heosConnector.getPlaylists().containsKey(playlist)) {
+               LOGGER.severe("Invalid request, invalid playlist: " + playlist);
+               response.getWriter().print("FAILED");
+               response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+               return;
+            }
+            if (result = heosConnector.playlist(player, playlist)) {
+               String fibaroVD = request.getParameter(REQUEST_PARAM_VIRTUAL_DEVICE);
+               if (fibaroVD != null && !fibaroVD.isEmpty()) {
+                  String playlistName = heosConnector.getPlaylists().get(playlist);
+                  fibaroConnector.setTextLabel(fibaroVD, FIBARO_VD_LABEL_ID, URLEncoder.encode(playlistName, "UTF-8"));
+               }
+            }
+            break;
+
+         /************
+          * INPUT *
+          ************/
+         case INPUT:
+            // Find out source player/input to play
+            String inputPlayer = request.getParameter(REQUEST_PARAM_INPUT_PLAYER) != null ? request.getParameter(REQUEST_PARAM_INPUT_PLAYER) : "";
+            String inputName = request.getParameter(REQUEST_PARAM_INPUT_NAME) != null ? request.getParameter(REQUEST_PARAM_INPUT_NAME) : "";
+            if (!heosConnector.getPlayers().containsKey(inputPlayer)) {
+               LOGGER.severe("Invalid request, invalid input player: " + inputPlayer);
+               response.getWriter().print("FAILED");
+               response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+               return;
+            }
+            if (result = heosConnector.input(player, inputPlayer, inputName)) {
+               String fibaroVD = request.getParameter(REQUEST_PARAM_VIRTUAL_DEVICE);
+               String labelText = request.getParameter(REQUEST_PARAM_LABEL_TEXT);
+               if (fibaroVD != null && !fibaroVD.isEmpty() && labelText != null && !labelText.isEmpty()) {
+                  fibaroConnector.setTextLabel(fibaroVD, FIBARO_VD_LABEL_ID, URLEncoder.encode(labelText, "UTF-8"));
+               }
+            }
+            break;
+
          /***********
           * VOLUME *
           ***********/
@@ -270,6 +316,7 @@ public class HEOSServlet extends HttpServlet {
                }
             }
             break;
+
          default:
             break;
          }
@@ -345,22 +392,42 @@ public class HEOSServlet extends HttpServlet {
          writer.println("<div>" + getValue(key) + value + "</div>");
       }
 
-      // API
-      writer.println("<h2 style='font-family:sans-serif;font-size:20px;color:#426d6e;margin-bottom: 5px;'>API</h1>");
-      writer.println("<div><b>" + getValue("Start playback") + "</b>" + getBaseURL(request) + "?command=play&player=123456789&vd=123</div>");
-      writer.println("<div><b>" + getValue("Stop playback") + "</b>" + getBaseURL(request) + "?command=stop&player=123456789&vd=123</div>");
-      writer.println("<div><b>" + getValue("Set volume") + "</b>" + getBaseURL(request) + "?command=volume&player=123456789&volume=50&vd=123</div>");
-      writer.println(
-            "<div><b>" + getValue("Play station") + "</b>" + getBaseURL(request) + "?command=station&station=s12345&vd=123&labeltext=Example%20Station</div>");
-      writer.println(
-            "<div><b>" + getValue("Alarm") + "</b>" + getBaseURL(request) + "?command=alarm&station=s12345&volume=50&vd=123&labeltext=Example%20Station</div>");
-      writer.println("<div><b>" + getValue("Trigger") + "</b>" + getBaseURL(request)
-            + "?command=trigger&station=s12345&volume=50&vd=123&labeltext=Example%20Station</div>");
+      // List playlists
+      writer.println("<h2 style='font-family:sans-serif;font-size:20px;color:#426d6e;margin-bottom: 5px;'>Playlists</h1>");
+      heosConnector.updatePlaylists();
+      Map<String, String> playlists = heosConnector.getPlaylists();
+      sortedKeys = heosConnector.entriesSortedByValues(playlists);
+      for (Entry<String, String> entry : sortedKeys) {
+         String key = entry.getKey();
+         String value = entry.getValue();
+         writer.println("<div>" + getValue(key) + value + "</div>");
+      }
 
+      // API
+      String playCommand = getBaseURL(request) + "?player=12345&command=play&vd=123";
+      String stopCommand = getBaseURL(request) + "?player=12345&command=stop&vd=123";
+      String volumeCommand = getBaseURL(request) + "?player=12345&command=volume&volume=50&vd=123";
+      String stationCommand = getBaseURL(request) + "?player=12345&command=station&station=s12345&vd=123&labeltext=Example%20Station";
+      String playlistCommand = getBaseURL(request) + "?player=12345&command=playlist&playlist=12345&vd=123&labeltext=Example%20Playlist";
+      String inputCommand = getBaseURL(request) + "?player=12345&command=input&inputplayer=23456&inputname=inputs/optical_in_1&vd=123&labeltext=Input%20Aux";
+      String alarmCommand = getBaseURL(request) + "?player=12345&command=alarm&station=s12345&volume=50&vd=123&labeltext=Station%20ABC";
+      String triggerCommand = getBaseURL(request) + "?player=12345&command=trigger&station=s12345&volume=50&vd=123&labeltext=Station%20ABC";
+      writer.println("<h2 style='font-family:sans-serif;font-size:20px;color:#426d6e;margin-bottom: 5px;'>API</h1>");
+      writer.println("<div><b>" + getValue("Start playback") + "</b>" + playCommand + "</div>");
+      writer.println("<div><b>" + getValue("Stop playback") + "</b>" + stopCommand + "</div>");
+      writer.println("<div><b>" + getValue("Set volume") + "</b>" + volumeCommand + "</div>");
+      writer.println("<div><b>" + getValue("Play station") + "</b>" + stationCommand + "</div>");
+      writer.println("<div><b>" + getValue("Play playlist") + "</b>" + playlistCommand + "</div>");
+      writer.println("<div><b>" + getValue("Play input") + "</b>" + inputCommand + "</div>");
+      writer.println("<div><b>" + getValue("Alarm") + "</b>" + alarmCommand + "</div>");
+      writer.println("<div><b>" + getValue("Trigger") + "</b>" + triggerCommand + "</div>");
       writer.println("<br><div>" + getValue("Parameters") + getValue("command") + "Command to run</div>");
       writer.println("<div>" + getValue("") + getValue("player") + "HEOS player (id)</div>");
       writer.println("<div>" + getValue("") + getValue("volume") + "Volume, 0 to 100 (value)</div>");
       writer.println("<div>" + getValue("") + getValue("station") + "Favorite station (id)</div>");
+      writer.println("<div>" + getValue("") + getValue("playlist") + "Playlist (id)</div>");
+      writer.println("<div>" + getValue("") + getValue("inputplayer") + "HEOS player (id) with input source</div>");
+      writer.println("<div>" + getValue("") + getValue("inputname") + "Input source name</div>");
       writer.println("<div>" + getValue("") + getValue("vd") + "Fibaro virtual device (optional) (id)</div>");
       writer.println("<div>" + getValue("") + getValue("labeltext") + "Fibaro \"now playing\"-label text (optional) (string)</div>");
       writer.println(
